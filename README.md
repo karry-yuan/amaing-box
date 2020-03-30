@@ -1,2 +1,2 @@
 # amaing-box
-eihei
+Information content security course exercise
