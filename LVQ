@@ -1,0 +1,250 @@
+import jieba as jb
+from sklearn import feature_extraction
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
+import re
+import math
+import numpy as np
+import random
+import os
+import matplotlib.pyplot as plt
+# 加载停用词，这里主要是排除“有限公司”一类的通用词
+dataMat=[]#所有分词列表
+def loadStopWords(fileName):#分词，返回列表
+    try:
+        fr=open(fileName,'rb')
+        words = fr.read()
+        result = jb.cut(words, cut_all=True)
+        newWords = []
+        stopwords = [u'（', u'）', '(', ')', '/', '-', '.', '-', '&', '《', '》', '、', '【', '】', '@', '“','”',' ','','——','。','，','；','\r\n']
+        for s in result:
+            if s not in stopwords:#去掉标点
+                newWords.append(s)
+    except IOError:
+        return 'None'
+    else:
+        return newWords
+
+
+# 把样本做分词处理，并写入dataMat
+def fileCut(fileName, n):
+    txt=''
+    cutWords = loadStopWords(fileName)
+    if cutWords!='None':
+        s=1
+        for i in range(len(cutWords)):
+            txt=txt+cutWords[i]+' '
+        dataMat.append(txt)
+    else:
+        s=0
+    return s
+
+
+
+#计算tf-idf矩阵
+def tfidf_value():
+    vectorizer = CountVectorizer()
+    X = vectorizer.fit_transform(dataMat)  # 计算各个词语出现的次数
+    # 获取词袋模型中的所有词语
+    word = vectorizer.get_feature_names()  # 获取词袋中所有文本关键字,词列表
+    #print('词列表长度',len(word))
+    # 获取每个词在该行（文档）中出现的次数
+    #counts = X.toarray()  # 词频矩阵结果
+    transformer = TfidfTransformer()  # 统计vectorizer中每个词语的TF-IDF值
+    tfidf = transformer.fit_transform(X)
+    result=tfidf.toarray()
+
+    return result
+
+#聚类
+def LVQ(dataset,T,sea,max_iter,a):
+    # 样本分类为T
+    # 随机产生原型向量
+    correct=0
+    row_rand_array = np.arange(dataset.shape[0])
+    np.random.shuffle(row_rand_array)
+    P = dataset[row_rand_array[0:len(T)]]
+    #print(len(P))
+    while max_iter > 0:
+        np.random.shuffle(row_rand_array)
+        X = dataset[row_rand_array[0:1]]# 随机选取一个样本
+        index=0
+        dist=np.linalg.norm(X - P[0])
+        for i in range(1,len(P)):#得到距离最近的中心
+            if np.linalg.norm(X - P[i])<dist:
+                dist=np.linalg.norm(X - P[i])
+                index=i
+        t = T[index]
+        con=int(row_rand_array[0:1])
+        if t == sea[con]:  # 类别标记相同
+            correct=correct+1
+            P[index] = ((1 - a) * P[index] + a * X)
+        else:  # 类别标记不同
+            P[index] = ((1 + a) * P[index] - a * X)
+        max_iter -= 1
+    #print(correct)
+    return P
+ #分类
+def train_show(P,dataset,T,sea):
+    correct=0
+    for i in range(len(dataset)):
+        X=dataset[i]
+        index = 0
+        dist = np.linalg.norm(X - P[0])
+        for j in range(1, len(P)):  # 得到距离最近的中心
+            if np.linalg.norm(X - P[j]) < dist:
+                dist = np.linalg.norm(X - P[j])
+                index =j
+        t = T[index]
+        con = int(i)
+        if t == sea[con]:  # 类别标记相同
+            correct = correct + 1
+    return correct
+#外部指标计算
+def external(P,dataset,T,sea):
+    a=0
+    b=0
+    c=0
+    d=0
+    for i in range(len(dataset)):
+        for j in range(i+1,len(dataset)):
+            recla1=sea[i]
+            recla2=sea[j]#原类别
+            index1 = 0
+            dist1 = np.linalg.norm(dataset[i] - P[0])
+            for k in range(1, len(P)):  # 得到距离最近的中心
+                if np.linalg.norm(dataset[i] - P[k]) < dist1:
+                    dist1 = np.linalg.norm(dataset[i] - P[k])
+                    index1 = k
+            cla1=T[index1]
+            index2 = 0
+            dist2 = np.linalg.norm(dataset[j] - P[0])
+            for k in range(1, len(P)):  # 得到距离最近的中心
+                if np.linalg.norm(dataset[j] - P[k]) < dist2:
+                    dist2 = np.linalg.norm(dataset[j] - P[k])
+                    index2= k
+            cla2 = T[index2]
+            if recla1==recla2 and cla1==cla2:
+                a=a+1
+            elif recla1==recla2 and cla1!=cla2:
+                b=b+1
+            elif recla1!=recla2 and cla1==cla2:
+                c=c+1
+            elif recla1!=recla2 and cla1==cla2:
+                d=d+1
+    #jc=a/(a+b+c)
+    fmi=((a/(a+b))*(a/(a+c)))**0.5
+    return fmi
+
+if __name__ == '__main__':
+    num = 0#读取的文档总数
+    filename_list=[]#读取的文件名列表
+    show=[]#类别标记
+    cla=set()#类别集合
+    n1=121#C5的文件
+    for i in range(1,n1):
+        if i<10:
+            i='00%d' % i
+        elif i<100:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C5-Education/C5-Education'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    n2=53
+    for i in range(1,n2):
+        if i<10:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C1-Communication/C17-Communication'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    n3=3202
+    for i in range(1,n3):
+        if i<10:
+            i='000%d' % i
+        elif i<100:
+            i='00%d' % i
+        elif i<1000:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C3-Economy/C34-Economy'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    n4=68
+    for i in range(1,n4):
+        if i<10:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C4-Literature/C4-Literature'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    n5=935
+    for i in range(1,n1):
+        if i<10:
+            i='00%d' % i
+        elif i<100:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C7-History/C7-History'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    n6=2507
+    for i in range(1,n3):
+        if i<10:
+            i='000%d' % i
+        elif i<100:
+            i='00%d' % i
+        elif i<1000:
+            i='0%d' % i
+        else:
+            i=str(i)
+        filepath = './C9-Sports/C39-Sports'+i+'.txt'
+        suc=fileCut(filepath, num)
+        if suc==1:
+            filename_list.append(filepath)
+            num=num+1
+    re=tfidf_value()#各文件向量
+    print(len(re))
+    for i in range(len(filename_list)):
+        show.append(filename_list[i][3])#加下个文件类别
+        if filename_list[i][3] not in cla:
+            cla.add(filename_list[i][3])#类别集合
+    cla=list(cla)
+    p=LVQ(re,cla,show,4000,0.01)
+    #c=train_show(p,re,cla,show)/len(re)
+    #f=external(p,re,cla,show)
+    #print(f)
+
+    c=[]
+    X=[200,400,600,800,1000,1200,1400,1600,1800,2000,2200,2400,2600,2800,3000,3200,3400,3600,3800,4000]
+    for i in range(len(X)):
+        p=LVQ(re,cla,show,X[i],0.01)
+        cc=train_show(p,re,cla,show)/len(re)
+        c.append(cc)
+    print(c)
+
+    #结果画图
+    plt.plot(X, c)
+    plt.show()
+
+
+
+
+
+
